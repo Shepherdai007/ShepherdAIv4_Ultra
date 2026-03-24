@@ -1,6 +1,6 @@
 import os
 import json
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, render_template, send_from_directory
 from openai import OpenAI
 from tavily import TavilyClient
 from dotenv import load_dotenv
@@ -8,7 +8,10 @@ from dotenv import load_dotenv
 # Load keys from .env
 load_dotenv()
 
-app = Flask(__name__, static_folder='static')
+# We specify the template folder explicitly to ensure Flask finds your index.html
+app = Flask(__name__, 
+            static_folder='static', 
+            template_folder='templates')
 
 # Initialize Clients
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -26,32 +29,34 @@ def web_search(query):
 
 @app.route('/')
 def index():
-    return send_from_directory('.', 'index.html')
+    """Serves the ShepherdAI v4 Ultra Frontend from the templates folder."""
+    return render_template('index.html')
 
 @app.route('/chat', methods=['POST'])
 def chat():
+    """Main Chat Endpoint with Tavily Web Search integration."""
     try:
         user_message = request.form.get('message')
         selected_model = request.form.get('model', 'gpt-4o')
         
-        # Mapping models from your UI
+        # Mapping models from your UI to official API IDs
         model_mapping = {
             "gpt-3": "gpt-3.5-turbo",
             "gpt-4": "gpt-4o",
-            "gpt-5": "o1-preview" # Using O1-preview for the 'GPT-5' experience
+            "gpt-5": "o1-preview" # Using O1-preview for the 'GPT-5' high-logic experience
         }
         target_model = model_mapping.get(selected_model, "gpt-4o")
 
         # 1. Check if the user is asking for something that needs a web search
-        # (This is a simple logic, we can make it more 'Ultra' with function calling later)
-        search_keywords = ["search", "who is", "latest", "news", "what happened", "weather", "price"]
+        search_keywords = ["search", "who is", "latest", "news", "what happened", "weather", "price", "today"]
         needs_search = any(word in user_message.lower() for word in search_keywords)
 
         context = ""
         if needs_search:
             print(f"Searching web for: {user_message}")
             results = web_search(user_message)
-            context = "\n\nWeb Search Results:\n" + json.dumps(results)
+            # Formatting search results for the AI context
+            context = "\n\nWeb Search Results (Real-time data):\n" + json.dumps(results)
 
         # 2. Call OpenAI with the search context included
         response = client.chat.completions.create(
@@ -59,7 +64,7 @@ def chat():
             messages=[
                 {
                     "role": "system", 
-                    "content": f"You are ShepherdAI v4 Ultra. You have access to real-time web data via Tavily. {context}"
+                    "content": f"You are ShepherdAI v4 Ultra, a premium assistant for King Emmanuel. You have access to real-time web data via Tavily. Use the following context to answer if relevant: {context}"
                 },
                 {"role": "user", "content": user_message}
             ],
@@ -76,7 +81,21 @@ def chat():
 
     except Exception as e:
         print(f"Server Error: {e}")
-        return jsonify({"status": "error", "reply": "Connection lost, King. Check your API keys."}), 500
+        return jsonify({
+            "status": "error", 
+            "reply": "Connection lost, King. Check your API keys or server logs."
+        }), 500
+
+# Route to serve the Service Worker from the root
+@app.route('/service-worker.js')
+def sw():
+    return send_from_directory('.', 'service-worker.js')
+
+# Route to serve the Manifest from the root
+@app.route('/manifest.json')
+def manifest():
+    return send_from_directory('.', 'manifest.json')
 
 if __name__ == '__main__':
+    # host 0.0.0.0 is required for Render/Deployment
     app.run(host='0.0.0.0', port=5000, debug=True)
